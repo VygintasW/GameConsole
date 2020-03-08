@@ -1,45 +1,90 @@
-﻿using Akka.Actor;
-using GameConsole.Messages;
+﻿using Akka.Persistence;
+using GameConsole.Commands;
+using GameConsole.Events;
+using GameConsole.States;
 using System;
 
 namespace GameConsole.Actors
 {
-    public class PlayerActor : ReceiveActor
+    public class PlayerActor : ReceivePersistentActor
     {
+        public override string PersistenceId => $"player-{PlayerActorState.PlayerName}";
+
+        private PlayerActorState PlayerActorState { get; set; }
+        private int EventCount { get; set; }
+
         public PlayerActor(string playerName, int health)
         {
-            PlayerName = playerName;
-            Health = health;
+            PlayerActorState = new PlayerActorState
+            {
+                PlayerName = playerName,
+                Health = health
+            };
 
-            Console.WriteLine($"{PlayerName} created");
+            Console.WriteLine($"{PlayerActorState.PlayerName} created");
 
-            Receive<HitMessage>(message => HitPlayer(message));
-            Receive<DisplayStatusMessage>(message => DisplayPlayerStatus(message));
-            Receive<CouseErrorMessage>(message => SimulateError());
+            Command<HitPlayer>(message => HitPlayer(message));
+            Command<DisplayStatus>(message => DisplayPlayerStatus(message));
+            Command<SimulateError>(message => SimulateError());
+
+            Recover<PlayerHit>(message =>
+            {
+                Console.WriteLine($"{PlayerActorState.PlayerName} replaying PlayerHit event from journal");
+
+                PlayerActorState.Health -= message.DamageTaken;
+            });
+
+            Recover<SnapshotOffer>(offer =>
+            {
+                Console.WriteLine($"{PlayerActorState.PlayerName} received SnapshotOffer from snapshot store, updating state");
+
+                PlayerActorState = offer.Snapshot as PlayerActorState;
+
+                Console.WriteLine($"{PlayerActorState.PlayerName} state {PlayerActorState} set from snapshot");
+            });
         }
 
         private void SimulateError()
         {
-            Console.WriteLine($"{PlayerName} received CauseErrorMessage");
+            Console.WriteLine($"{PlayerActorState.PlayerName} received SimulateError");
 
-            throw new ApplicationException($"Simulated exception in player: {PlayerName}");
+            throw new ApplicationException($"Simulated exception in player: {PlayerActorState.PlayerName}");
         }
 
-        private void DisplayPlayerStatus(DisplayStatusMessage message)
+        private void DisplayPlayerStatus(DisplayStatus message)
         {
-            Console.WriteLine($"{PlayerName} received DisplayStatusMessage");
+            Console.WriteLine($"{PlayerActorState.PlayerName} received DisplayStatus");
 
-            Console.WriteLine($"{PlayerName} has {Health} health");
+            Console.WriteLine($"{PlayerActorState.PlayerName} has {PlayerActorState.Health} health");
         }
 
-        private void HitPlayer(HitMessage message)
+        private void HitPlayer(HitPlayer command)
         {
-            Console.WriteLine($"{PlayerName} received HitMessage");
+            Console.WriteLine($"{PlayerActorState.PlayerName} received HitPlayer");
 
-            Health -= message.Damage;
+            Console.WriteLine($"{PlayerActorState.PlayerName} persisting HitPlayer");
+
+            var playerEvent = new PlayerHit(command.Damage);
+
+            Persist(playerEvent, playerHit =>
+            {
+                Console.WriteLine($"{PlayerActorState.PlayerName} persisted PlayerHit event ok, updating actor state");
+
+                PlayerActorState.Health -= command.Damage;
+                EventCount++;
+
+                if(EventCount == 5)
+                {
+                    Console.WriteLine($"{PlayerActorState.PlayerName} saving snapshot");
+
+                    SaveSnapshot(PlayerActorState);
+
+                    Console.WriteLine($"{PlayerActorState.PlayerName} reseting event count to 0");
+
+                    EventCount = 0;
+                }
+            });
+
         }
-
-        private string PlayerName { get; }
-        private int Health { get; set; }
     }
 }

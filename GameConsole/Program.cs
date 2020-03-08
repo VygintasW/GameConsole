@@ -1,7 +1,10 @@
 ﻿using Akka.Actor;
+using Akka.Configuration;
 using GameConsole.Actors;
-using GameConsole.Messages;
+using GameConsole.Commands;
+using Microsoft.Extensions.Configuration;
 using System;
+using System.IO;
 using System.Threading;
 
 namespace GameConsole
@@ -12,7 +15,17 @@ namespace GameConsole
         private static IActorRef PlayerCoordinator { set; get; }
         static void Main(string[] args)
         {
-            System = ActorSystem.Create("Game");
+            var builder = new ConfigurationBuilder()
+                .SetBasePath(Directory.GetCurrentDirectory())
+                .AddXmlFile("hocon.xml");
+
+            var configuration = builder.Build();
+
+            var hoconConfig = configuration.GetSection("hocon");
+
+            var config = ConfigurationFactory.ParseString(hoconConfig.Value);
+
+            System = ActorSystem.Create("Game", config);
 
             PlayerCoordinator = System.ActorOf<PlayerCoordinatorActor>("PlayerCoordinator");
 
@@ -53,24 +66,24 @@ namespace GameConsole
         private static void ErrorPlayer(string playerName)
         {
             System.ActorSelection($"/user/PlayerCoordinator/{playerName}")
-                  .Tell(new CouseErrorMessage());
+                  .Tell(new SimulateError());
         }
 
         private static void DisplayPlayer(string playerName)
         {
             System.ActorSelection($"/user/PlayerCoordinator/{playerName}")
-                  .Tell(new DisplayStatusMessage());
+                  .Tell(new DisplayStatus());
         }
 
         private static void HitPlayer(string playerName, int damage)
         {
             System.ActorSelection($"/user/PlayerCoordinator/{playerName}")
-                  .Tell(new HitMessage(damage));
+                  .Tell(new HitPlayer(damage));
         }
 
         private static void CreatePlayer(string playerName)
         {
-            PlayerCoordinator.Tell(new CreatePlayerMessage(playerName));
+            PlayerCoordinator.Tell(new CreatePlayer(playerName));
         }
 
         private static string ReadLine()
